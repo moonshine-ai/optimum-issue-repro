@@ -6,7 +6,7 @@ import numpy as np
 from datasets import load_dataset, Audio
 from jiwer import wer, cer
 from tqdm import tqdm
-from transformers import pipeline
+from transformers import pipeline, AutoProcessor, MoonshineForConditionalGeneration
 from whisper_normalizer.english import EnglishTextNormalizer
 from koreantextnormalizer import KoreanTextNormalizer
 
@@ -38,6 +38,8 @@ elif args.framework == "transformers":
     else:
         model_id = f"UsefulSensors/moonshine-{args.model_type}-{language_code}"
     pipeline = pipeline(task="automatic-speech-recognition", model=model_id, device=0, num_beams=1)
+    processor = AutoProcessor.from_pretrained(model_id)
+    model = MoonshineForConditionalGeneration.from_pretrained(model_id)
 else:
     raise ValueError(f"Invalid framework: {args.framework}")
 
@@ -65,7 +67,10 @@ for sample in tqdm(test_dataset):
         tokens = model.generate(audio.reshape(1, -1))
         transcription = moonshine_onnx.load_tokenizer().decode_batch(tokens)[0]
     elif args.framework == "transformers":
-        transcription = pipeline(audio)["text"]
+        inputs = processor(audio, attention_mask=np.ones_like(audio), sampling_rate=16000, return_tensors="pt")
+        input_values = inputs.input_values
+        generated_ids = model.generate(input_values, max_new_tokens=100)
+        transcription = moonshine_onnx.load_tokenizer().decode_batch(generated_ids.tolist())[0]
     normalized_transcription = normalizer(transcription)
     normalized_ground_truth = normalizer(ground_truth)
     current_wer = wer(normalized_ground_truth, normalized_transcription)
