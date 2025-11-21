@@ -6,14 +6,16 @@ import numpy as np
 from datasets import load_dataset, Audio
 from jiwer import wer, cer
 from tqdm import tqdm
-import torch
 from transformers import pipeline
+from whisper_normalizer.english import EnglishTextNormalizer
+from koreantextnormalizer import KoreanTextNormalizer
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--audio", type=str, default=None)
 parser.add_argument("--language", type=str, default="en_us")
 parser.add_argument("--model-type", type=str, default="base")
-parser.add_argument("--models-dir", type=str, default=None)
+parser.add_argument("--model-dir", type=str, default=None)
 parser.add_argument("--model-format", type=str, default="onnx")
 parser.add_argument("--framework", type=str, default="onnx")
 args = parser.parse_args()
@@ -21,13 +23,13 @@ args = parser.parse_args()
 language_code, country_code = args.language.split("_")
 
 if args.framework == "onnx":
-    if args.models_dir is None:
-        args.models_dir = os.path.join(
+    if args.model_dir is None:
+        args.model_dir = os.path.join(
             os.path.dirname(__file__), f"{language_code}-{args.model_type}"
         )
     model = moonshine_onnx.MoonshineOnnxModel(
         model_name=args.model_type,
-        models_dir=args.models_dir,
+        models_dir=args.model_dir,
         model_format=args.model_format,
     )
 elif args.framework == "transformers":
@@ -35,7 +37,7 @@ elif args.framework == "transformers":
         model_id = f"UsefulSensors/moonshine-{args.model_type}"
     else:
         model_id = f"UsefulSensors/moonshine-{args.model_type}-{language_code}"
-    pipeline = pipeline(task="automatic-speech-recognition", model=model_id, device=0)
+    pipeline = pipeline(task="automatic-speech-recognition", model=model_id, device=0, num_beams=1)
 else:
     raise ValueError(f"Invalid framework: {args.framework}")
 
@@ -47,6 +49,13 @@ wer_total = 0
 cer_total = 0
 character_count = 0
 
+if language_code == "ko":
+    korean_normalizer = KoreanTextNormalizer()
+    def normalizer(text):
+        return korean_normalizer.normalize(text)
+else:
+    normalizer = EnglishTextNormalizer()
+
 for sample in tqdm(test_dataset):
     audio = sample["audio"]["array"].astype(np.float32)
     ground_truth = sample["transcription"]
@@ -57,10 +66,10 @@ for sample in tqdm(test_dataset):
         transcription = moonshine_onnx.load_tokenizer().decode_batch(tokens)[0]
     elif args.framework == "transformers":
         transcription = pipeline(audio)["text"]
-    print(f"Ground truth : {ground_truth}")
-    print(f"Transcription: {transcription}")
-    current_wer = wer(ground_truth, transcription)
-    current_cer = cer(ground_truth, transcription)
+    normalized_transcription = normalizer(transcription)
+    normalized_ground_truth = normalizer(ground_truth)
+    current_wer = wer(normalized_ground_truth, normalized_transcription)
+    current_cer = cer(normalized_ground_truth, normalized_transcription)
     wer_total += current_wer * current_character_count
     cer_total += current_cer * current_character_count
 
