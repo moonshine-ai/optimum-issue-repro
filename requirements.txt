@@ -1,0 +1,10 @@
+useful-moonshine-onnx==20251120
+transformers
+onnxruntime==1.23.2
+jiwer
+optimum[onnxruntime]
+datasets==3.6.0
+torch
+ffmpeg
+soundfile
+librosa
